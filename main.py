@@ -26,6 +26,8 @@ from utils.render import get_depths_image, cget_depths_image, cpncc
 from utils.paf import gen_img_paf
 import argparse
 import torch.backends.cudnn as cudnn
+import os
+import sys
 
 STD_SIZE = 120
 
@@ -58,123 +60,158 @@ def main(args):
     # 3. forward
     tri = sio.loadmat('visualize/tri.mat')['tri']
     transform = transforms.Compose([ToTensorGjz(), NormalizeGjz(mean=127.5, std=128)])
-    for img_fp in args.files:
-        img_ori = cv2.imread(img_fp)
-        if args.dlib_bbox:
-            rects = face_detector(img_ori, 1)
-        else:
-            rects = []
+    
+    input_dir = '/media/rzats/Elements/UV_Data/Generated_Faces'
+    img_paths = []
+    for subdir, dirs, files in os.walk(input_dir):
+      for file in files:
+          #print os.path.join(subdir, file)
+          img_paths.append(input_dir + os.sep + file)
+    imgs = []
+    inputs = []
+    input_paths = []
+    for img_fp in img_paths: #args.files:
+        try:
+          print(img_fp)
+          img_ori = cv2.imread(img_fp)
+          if args.dlib_bbox:
+              rects = face_detector(img_ori, 1)
+          else:
+              rects = []
 
-        if len(rects) == 0:
-            rects = dlib.rectangles()
-            rect_fp = img_fp + '.bbox'
-            lines = open(rect_fp).read().strip().split('\n')[1:]
-            for l in lines:
-                l, r, t, b = [int(_) for _ in l.split(' ')[1:]]
-                rect = dlib.rectangle(l, r, t, b)
-                rects.append(rect)
+          if len(rects) == 0:
+              rects = dlib.rectangles()
+              rect_fp = img_fp + '.bbox'
+              lines = open(rect_fp).read().strip().split('\n')[1:]
+              for l in lines:
+                  l, r, t, b = [int(_) for _ in l.split(' ')[1:]]
+                  rect = dlib.rectangle(l, r, t, b)
+                  rects.append(rect)
 
-        pts_res = []
-        Ps = []  # Camera matrix collection
-        poses = []  # pose collection, [todo: validate it]
-        vertices_lst = []  # store multiple face vertices
-        ind = 0
-        suffix = get_suffix(img_fp)
-        for rect in rects:
-            # whether use dlib landmark to crop image, if not, use only face bbox to calc roi bbox for cropping
-            if args.dlib_landmark:
-                # - use landmark for cropping
-                pts = face_regressor(img_ori, rect).parts()
-                pts = np.array([[pt.x, pt.y] for pt in pts]).T
-                roi_box = parse_roi_box_from_landmark(pts)
-            else:
-                # - use detected face bbox
-                bbox = [rect.left(), rect.top(), rect.right(), rect.bottom()]
-                roi_box = parse_roi_box_from_bbox(bbox)
+          pts_res = []
+          Ps = []  # Camera matrix collection
+          poses = []  # pose collection, [todo: validate it]
+          vertices_lst = []  # store multiple face vertices
+          ind = 0
+          suffix = get_suffix(img_fp)
+          for rect in rects:
+              # whether use dlib landmark to crop image, if not, use only face bbox to calc roi bbox for cropping
+              if args.dlib_landmark:
+                  # - use landmark for cropping
+                  pts = face_regressor(img_ori, rect).parts()
+                  pts = np.array([[pt.x, pt.y] for pt in pts]).T
+                  roi_box = parse_roi_box_from_landmark(pts)
+              else:
+                  # - use detected face bbox
+                  bbox = [rect.left(), rect.top(), rect.right(), rect.bottom()]
+                  roi_box = parse_roi_box_from_bbox(bbox)
 
-            img = crop_img(img_ori, roi_box)
+              img = crop_img(img_ori, roi_box)
+              img = cv2.resize(img, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
+              input = transform(img).unsqueeze(0)
+              imgs.append(img)
+              inputs.append(input)
+              input_paths.append(img_fp)
+          if len(inputs) == 128:
+              # forward: one step
+              with torch.no_grad():
+                  inputs = torch.cat(inputs)
+                  if args.mode == 'gpu':
+                      inputs = inputs.cuda()
+                  param = model(inputs)
+                  print(param.shape)
+                  for i in range(param.shape[0]):
+                    prediction = param[i].squeeze().cpu().numpy().flatten().astype(np.float32)
+                    print(type(imgs[i]))
+                    print(type(prediction))
+                    wfp_paf = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}'.format(os.path.basename(input_paths[i]))
+                    #wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
+                    paf_feature = gen_img_paf(img_crop=imgs[i], param=prediction, kernel_size=args.paf_size)
+                    cv2.imwrite(wfp_paf, paf_feature)
+              imgs = []
+              inputs = []
+              input_paths = []
 
-            # forward: one step
-            img = cv2.resize(img, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
-            input = transform(img).unsqueeze(0)
-            with torch.no_grad():
-                if args.mode == 'gpu':
-                    input = input.cuda()
-                param = model(input)
-                param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
+              # 68 pts
+              #pts68 = predict_68pts(param, roi_box)
 
-            # 68 pts
-            pts68 = predict_68pts(param, roi_box)
+              # two-step for more accurate bbox to crop face
+              #if args.bbox_init == 'two':
+              #    roi_box = parse_roi_box_from_landmark(pts68)
+              #    img_step2 = crop_img(img_ori, roi_box)
+              #    img_step2 = cv2.resize(img_step2, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
+              #    input = transform(img_step2).unsqueeze(0)
+              #    with torch.no_grad():
+              #        if args.mode == 'gpu':
+              #            input = input.cuda()
+              #        param = model(input)
+              #        param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
+              #
+              #    pts68 = predict_68pts(param, roi_box)
 
-            # two-step for more accurate bbox to crop face
-            if args.bbox_init == 'two':
-                roi_box = parse_roi_box_from_landmark(pts68)
-                img_step2 = crop_img(img_ori, roi_box)
-                img_step2 = cv2.resize(img_step2, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
-                input = transform(img_step2).unsqueeze(0)
-                with torch.no_grad():
-                    if args.mode == 'gpu':
-                        input = input.cuda()
-                    param = model(input)
-                    param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
+              #pts_res.append(pts68)
+              #P, pose = parse_pose(param)
+              #Ps.append(P)
+              #poses.append(pose)
 
-                pts68 = predict_68pts(param, roi_box)
+              # dense face 3d vertices
+              if args.dump_ply or args.dump_vertex or args.dump_depth or args.dump_pncc or args.dump_obj:
+                  vertices = predict_dense(param, roi_box)
+                  vertices_lst.append(vertices)
+              if args.dump_ply:
+                  dump_to_ply(vertices, tri, '{}_{}.ply'.format(img_fp.replace(suffix, ''), ind))
+              if args.dump_vertex:
+                  dump_vertex(vertices, '{}_{}.mat'.format(img_fp.replace(suffix, ''), ind))
+              if args.dump_pts:
+                  wfp = '{}_{}.txt'.format(img_fp.replace(suffix, ''), ind)
+                  np.savetxt(wfp, pts68, fmt='%.3f')
+                  print('Save 68 3d landmarks to {}'.format(wfp))
+              if args.dump_roi_box:
+                  wfp = '{}_{}.roibox'.format(img_fp.replace(suffix, ''), ind)
+                  np.savetxt(wfp, roi_box, fmt='%.3f')
+                  print('Save roi box to {}'.format(wfp))
+              if args.dump_paf:
+                  wfp_paf = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}'.format(os.path.basename(img_fp))
+                  wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
+                  paf_feature = gen_img_paf(img_crop=img, param=param, kernel_size=args.paf_size)
 
-            pts_res.append(pts68)
-            P, pose = parse_pose(param)
-            Ps.append(P)
-            poses.append(pose)
+                  cv2.imwrite(wfp_paf, paf_feature)
+                  #cv2.imwrite(wfp_crop, img)
+                  #print('Dump to {} and {}'.format(wfp_crop, wfp_paf))
+                  #print('Dump to {}'.format(wfp_paf))
+              if args.dump_obj:
+                  wfp = '{}_{}.obj'.format(img_fp.replace(suffix, ''), ind)
+                  colors = get_colors(img_ori, vertices)
+                  write_obj_with_colors(wfp, vertices, tri, colors)
+                  print('Dump obj with sampled texture to {}'.format(wfp))
+              ind += 1
 
-            # dense face 3d vertices
-            if args.dump_ply or args.dump_vertex or args.dump_depth or args.dump_pncc or args.dump_obj:
-                vertices = predict_dense(param, roi_box)
-                vertices_lst.append(vertices)
-            if args.dump_ply:
-                dump_to_ply(vertices, tri, '{}_{}.ply'.format(img_fp.replace(suffix, ''), ind))
-            if args.dump_vertex:
-                dump_vertex(vertices, '{}_{}.mat'.format(img_fp.replace(suffix, ''), ind))
-            if args.dump_pts:
-                wfp = '{}_{}.txt'.format(img_fp.replace(suffix, ''), ind)
-                np.savetxt(wfp, pts68, fmt='%.3f')
-                print('Save 68 3d landmarks to {}'.format(wfp))
-            if args.dump_roi_box:
-                wfp = '{}_{}.roibox'.format(img_fp.replace(suffix, ''), ind)
-                np.savetxt(wfp, roi_box, fmt='%.3f')
-                print('Save roi box to {}'.format(wfp))
-            if args.dump_paf:
-                wfp_paf = '{}_{}_paf.jpg'.format(img_fp.replace(suffix, ''), ind)
-                wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
-                paf_feature = gen_img_paf(img_crop=img, param=param, kernel_size=args.paf_size)
-
-                cv2.imwrite(wfp_paf, paf_feature)
-                cv2.imwrite(wfp_crop, img)
-                print('Dump to {} and {}'.format(wfp_crop, wfp_paf))
-            if args.dump_obj:
-                wfp = '{}_{}.obj'.format(img_fp.replace(suffix, ''), ind)
-                colors = get_colors(img_ori, vertices)
-                write_obj_with_colors(wfp, vertices, tri, colors)
-                print('Dump obj with sampled texture to {}'.format(wfp))
-            ind += 1
-
-        if args.dump_pose:
-            # P, pose = parse_pose(param)  # Camera matrix (without scale), and pose (yaw, pitch, roll, to verify)
-            img_pose = plot_pose_box(img_ori, Ps, pts_res)
-            wfp = img_fp.replace(suffix, '_pose.jpg')
-            cv2.imwrite(wfp, img_pose)
-            print('Dump to {}'.format(wfp))
-        if args.dump_depth:
-            wfp = img_fp.replace(suffix, '_depth.png')
-            # depths_img = get_depths_image(img_ori, vertices_lst, tri-1)  # python version
-            depths_img = cget_depths_image(img_ori, vertices_lst, tri - 1)  # cython version
-            cv2.imwrite(wfp, depths_img)
-            print('Dump to {}'.format(wfp))
-        if args.dump_pncc:
-            wfp = img_fp.replace(suffix, '_pncc.png')
-            pncc_feature = cpncc(img_ori, vertices_lst, tri - 1)  # cython version
-            cv2.imwrite(wfp, pncc_feature[:, :, ::-1])  # cv2.imwrite will swap RGB -> BGR
-            print('Dump to {}'.format(wfp))
-        if args.dump_res:
-            draw_landmarks(img_ori, pts_res, wfp=img_fp.replace(suffix, '_3DDFA.jpg'), show_flg=args.show_flg)
+          if args.dump_pose:
+              # P, pose = parse_pose(param)  # Camera matrix (without scale), and pose (yaw, pitch, roll, to verify)
+              img_pose = plot_pose_box(img_ori, Ps, pts_res)
+              wfp = img_fp.replace(suffix, '_pose.jpg')
+              cv2.imwrite(wfp, img_pose)
+              print('z to {}'.format())
+          if args.dump_depth:
+              wfp = img_fp.replace(suffix, '_depth.png')
+              # depths_img = get_depths_image(img_ori, vertices_lst, tri-1)  # python version
+              depths_img = cget_depths_image(img_ori, vertices_lst, tri - 1)  # cython version
+              cv2.imwrite(wfp, depths_img)
+              print('Dump to {}'.format(wfp))
+          if args.dump_pncc:
+              wfp = img_fp.replace(suffix, '_pncc.png')
+              pncc_feature = cpncc(img_ori, vertices_lst, tri - 1)  # cython version
+              cv2.imwrite(wfp, pncc_feature[:, :, ::-1])  # cv2.imwrite will swap RGB -> BGR
+              print('Dump to {}'.format(wfp))
+          if args.dump_res:
+              draw_landmarks(img_ori, pts_res, wfp=img_fp.replace(suffix, '_3DDFA.jpg'), show_flg=args.show_flg)
+        except KeyboardInterrupt:
+          raise
+        #except:
+        #  print("Unexpected error:", sys.exc_info()[0])
+        #  with open("BAD", "a") as file_object:
+        #    file_object.write(img_fp)
+        #  pass     
 
 
 if __name__ == '__main__':
