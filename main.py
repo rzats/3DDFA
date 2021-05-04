@@ -67,6 +67,9 @@ def main(args):
       for file in files:
           #print os.path.join(subdir, file)
           img_paths.append(input_dir + os.sep + file)
+    imgs = []
+    inputs = []
+    input_paths = []
     for img_fp in img_paths: #args.files:
         try:
           print(img_fp)
@@ -104,32 +107,47 @@ def main(args):
                   roi_box = parse_roi_box_from_bbox(bbox)
 
               img = crop_img(img_ori, roi_box)
-
-              # forward: one step
               img = cv2.resize(img, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
               input = transform(img).unsqueeze(0)
+              imgs.append(img)
+              inputs.append(input)
+              input_paths.append(img_fp)
+          if len(inputs) == 128:
+              # forward: one step
               with torch.no_grad():
+                  inputs = torch.cat(inputs)
                   if args.mode == 'gpu':
-                      input = input.cuda()
-                  param = model(input)
-                  param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
+                      inputs = inputs.cuda()
+                  param = model(inputs)
+                  print(param.shape)
+                  for i in range(param.shape[0]):
+                    prediction = param[i].squeeze().cpu().numpy().flatten().astype(np.float32)
+                    print(type(imgs[i]))
+                    print(type(prediction))
+                    wfp_paf = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}'.format(os.path.basename(input_paths[i]))
+                    #wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
+                    paf_feature = gen_img_paf(img_crop=imgs[i], param=prediction, kernel_size=args.paf_size)
+                    cv2.imwrite(wfp_paf, paf_feature)
+              imgs = []
+              inputs = []
+              input_paths = []
 
               # 68 pts
               #pts68 = predict_68pts(param, roi_box)
 
               # two-step for more accurate bbox to crop face
-              if args.bbox_init == 'two':
-                  roi_box = parse_roi_box_from_landmark(pts68)
-                  img_step2 = crop_img(img_ori, roi_box)
-                  img_step2 = cv2.resize(img_step2, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
-                  input = transform(img_step2).unsqueeze(0)
-                  with torch.no_grad():
-                      if args.mode == 'gpu':
-                          input = input.cuda()
-                      param = model(input)
-                      param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
-
-                  pts68 = predict_68pts(param, roi_box)
+              #if args.bbox_init == 'two':
+              #    roi_box = parse_roi_box_from_landmark(pts68)
+              #    img_step2 = crop_img(img_ori, roi_box)
+              #    img_step2 = cv2.resize(img_step2, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
+              #    input = transform(img_step2).unsqueeze(0)
+              #    with torch.no_grad():
+              #        if args.mode == 'gpu':
+              #            input = input.cuda()
+              #        param = model(input)
+              #        param = param.squeeze().cpu().numpy().flatten().astype(np.float32)
+              #
+              #    pts68 = predict_68pts(param, roi_box)
 
               #pts_res.append(pts68)
               #P, pose = parse_pose(param)
@@ -187,11 +205,13 @@ def main(args):
               print('Dump to {}'.format(wfp))
           if args.dump_res:
               draw_landmarks(img_ori, pts_res, wfp=img_fp.replace(suffix, '_3DDFA.jpg'), show_flg=args.show_flg)
-        except:
-          print("Unexpected error:", sys.exc_info()[0])
-          with open("BAD", "a") as file_object:
-            file_object.write(img_fp)
-          pass     
+        except KeyboardInterrupt:
+          raise
+        #except:
+        #  print("Unexpected error:", sys.exc_info()[0])
+        #  with open("BAD", "a") as file_object:
+        #    file_object.write(img_fp)
+        #  pass     
 
 
 if __name__ == '__main__':
