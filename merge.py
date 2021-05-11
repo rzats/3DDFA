@@ -28,51 +28,54 @@ import argparse
 import torch.backends.cudnn as cudnn
 import os
 import sys
+import cv2 as cv
 
 STD_SIZE = 120
 
 
 def main(args):
     # 1. load pre-tained model
-    checkpoint_fp = 'models/phase1_wpdc_vdc.pth.tar'
-    arch = 'mobilenet_1'
+    #checkpoint_fp = 'models/phase1_wpdc_vdc.pth.tar'
+    #arch = 'mobilenet_1'
 
-    checkpoint = torch.load(checkpoint_fp, map_location=lambda storage, loc: storage)['state_dict']
-    model = getattr(mobilenet_v1, arch)(num_classes=62)  # 62 = 12(pose) + 40(shape) +10(expression)
+    #checkpoint = torch.load(checkpoint_fp, map_location=lambda storage, loc: storage)['state_dict']
+    #model = getattr(mobilenet_v1, arch)(num_classes=62)  # 62 = 12(pose) + 40(shape) +10(expression)
 
-    model_dict = model.state_dict()
+    #model_dict = model.state_dict()
     # because the model is trained by multiple gpus, prefix module should be removed
-    for k in checkpoint.keys():
-        model_dict[k.replace('module.', '')] = checkpoint[k]
-    model.load_state_dict(model_dict)
-    if args.mode == 'gpu':
-        cudnn.benchmark = True
-        model = model.cuda()
-    model.eval()
+    #for k in checkpoint.keys():
+    #    model_dict[k.replace('module.', '')] = checkpoint[k]
+    #model.load_state_dict(model_dict)
+    #if args.mode == 'gpu':
+    #    cudnn.benchmark = True
+    #    model = model.cuda()
+    #model.eval()
 
     # 2. load dlib model for face detection and landmark used for face cropping
-    if args.dlib_landmark:
-        dlib_landmark_model = 'models/shape_predictor_68_face_landmarks.dat'
-        face_regressor = dlib.shape_predictor(dlib_landmark_model)
-    if args.dlib_bbox:
-        face_detector = dlib.get_frontal_face_detector()
+    #if args.dlib_landmark:
+    #    dlib_landmark_model = 'models/shape_predictor_68_face_landmarks.dat'
+    #    face_regressor = dlib.shape_predictor(dlib_landmark_model)
+    #if args.dlib_bbox:
+    #    face_detector = dlib.get_frontal_face_detector()
 
     # 3. forward
-    tri = sio.loadmat('visualize/tri.mat')['tri']
-    transform = transforms.Compose([ToTensorGjz(), NormalizeGjz(mean=127.5, std=128)])
+    #tri = sio.loadmat('visualize/tri.mat')['tri']
+    #transform = transforms.Compose([ToTensorGjz(), NormalizeGjz(mean=127.5, std=128)])
     
-    input_dir = '/media/rzats/Elements/UV_Data/Generated_Faces'
+    input_dir = '/media/rzats/Elements/UV_Data/Incomplete_UVs'
     img_paths = []
     for subdir, dirs, files in os.walk(input_dir):
       for file in files:
-          #print os.path.join(subdir, file)
-          img_paths.append(input_dir + os.sep + file)
+        if file.endswith('_0_2.jpg') or file.endswith('_0_5.jpg') or file.endswith('_0_8.jpg'):
+          img_paths.append(file)
+    img_paths = set(img_paths)
+    '''
     output_dir = '/media/rzats/Elements/UV_Data/Incomplete_UVs'
     output_paths = []
     for subdir, dirs, files in os.walk(output_dir):
       for file in files:
-          #print os.path.join(subdir, file)
           output_paths.append(file)
+    print(img_paths[:100])
     output_paths = set(output_paths)
     imgs = []
     inputs = []
@@ -82,8 +85,43 @@ def main(args):
     RESUME_INDEX = 0#77000
     
     floof = 0
-    for img_fp in img_paths: #args.files:
+    '''
+
+    for i in range(100000):
         # this vertical stuff was garbage, delete later
+        name = '{0:05d}'.format(i)
+        print(name)
+        left_name = '{}_0_8.jpg'.format(name)
+        middle_name = '{}_0_5.jpg'.format(name)
+        right_name = '{}_0_2.jpg'.format(name)
+        if left_name in img_paths and middle_name in img_paths and right_name in img_paths:
+          left = cv2.imread(input_dir + os.sep + left_name)
+          center = cv2.imread(input_dir + os.sep + middle_name)
+          right = cv2.imread(input_dir + os.sep + right_name)
+
+          # Take the middle third part from the central image
+          center_mid = np.array_split(center, 3, axis=1)[1]
+          
+          # Define mask & center point for seamlessClone
+          black = np.full(center_mid.shape, 0, dtype = np.uint8)
+          white = np.full(center_mid.shape, 255, dtype = np.uint8)
+          mask = np.concatenate([black, white, black], axis=1)
+          center_point = (left.shape[1]//2, left.shape[0]//2)
+          center_masked = np.concatenate([black, center_mid, black], axis=1)
+
+          # Overlay center middle onto left image, then right image
+          im_clone1 = cv.seamlessClone(center_masked, left, mask, center_point, cv.NORMAL_CLONE)
+          im_clone2 = cv.seamlessClone(center_masked, right, mask, center_point, cv.NORMAL_CLONE)
+
+          # Merge left & right halves of the results
+          clones_with_seam = np.concatenate([np.array_split(im_clone1, 2, axis=1)[0], np.array_split(im_clone2, 2, axis=1)[1]], axis=1)
+
+          # Overlay center middle again to correct the seam in the middle
+          clones_without_seam = cv.seamlessClone(center_masked, clones_with_seam, mask, center_point, cv.NORMAL_CLONE)
+          seamless_path = '/media/rzats/Elements/UV_Data/Completed_UVs/{}.jpg'.format(name)
+          cv2.imwrite(seamless_path, clones_without_seam)
+        
+    '''
         floof += 1
         if floof % 10000 == 0:
           print(floof)
@@ -234,7 +272,7 @@ def main(args):
           with open("BAD", "a") as file_object:
             file_object.write(img_fp + "\n")
           pass     
-
+'''
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='3DDFA inference pipeline')
