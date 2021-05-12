@@ -61,13 +61,14 @@ def main(args):
     tri = sio.loadmat('visualize/tri.mat')['tri']
     transform = transforms.Compose([ToTensorGjz(), NormalizeGjz(mean=127.5, std=128)])
     
+    print("floof")
     input_dir = '/media/rzats/Elements/UV_Data/Generated_Faces'
     img_paths = []
     for subdir, dirs, files in os.walk(input_dir):
       for file in files:
           #print os.path.join(subdir, file)
           img_paths.append(input_dir + os.sep + file)
-    output_dir = '/media/rzats/Elements/UV_Data/Incomplete_UVs'
+    output_dir = '/media/windows/UV_Data/Mask_UVs'
     output_paths = []
     for subdir, dirs, files in os.walk(output_dir):
       for file in files:
@@ -75,6 +76,8 @@ def main(args):
           output_paths.append(file)
     output_paths = set(output_paths)
     imgs = []
+    img_oris = []
+    roi_boxes = []
     inputs = []
     input_paths = []
     
@@ -84,14 +87,15 @@ def main(args):
     floof = 0
     for img_fp in img_paths: #args.files:
         # this vertical stuff was garbage, delete later
+        print(img_fp)
         floof += 1
         if floof % 10000 == 0:
           print(floof)
         base = os.path.basename(img_fp)
         if(int(base.split("_")[0]) < RESUME_INDEX):
           continue
-        if(base in output_paths):
-          continue
+        #if(base in output_paths):
+        #  continue
         try:
           print(base)
           print(len(inputs))
@@ -133,6 +137,8 @@ def main(args):
               img = cv2.resize(img, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
               input = transform(img).unsqueeze(0)
               imgs.append(img)
+              img_oris.append(img_ori)
+              roi_boxes.append(roi_box)
               inputs.append(input)
               input_paths.append(img_fp)
           if len(inputs) >= 1:
@@ -143,14 +149,33 @@ def main(args):
                   if args.mode == 'gpu':
                       inputs = inputs.cuda()
                   param = model(inputs)
-                  print(param.shape)
+
                   for i in range(param.shape[0]):
                     prediction = param[i].squeeze().cpu().numpy().flatten().astype(np.float32)
-                    wfp_paf = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}'.format(os.path.basename(input_paths[i]))
-                    #wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
-                    paf_feature = gen_img_paf(img_crop=imgs[i], param=prediction, kernel_size=args.paf_size)
+                    wfp_paf = output_dir +'/{}'.format(os.path.basename(input_paths[i]))
+                    wfp_crop = output_dir +'/{}_{}_crop.jpg'.format(os.path.basename(input_paths[i]), ind)
+                    
+                    
+                    # PAF TIME
+                    img_ori_to_paf = img_oris[i]
+                    pts68 = predict_68pts(prediction, roi_box)
+                    polygon = []
+                    for point in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17]:
+                      polygon.append([pts68[0,point], pts68[1,point]])
+                    polygon = np.array(polygon)
+                    print(polygon)
+                    mask = np.zeros(img_ori_to_paf.shape, dtype=np.uint8)
+                    cv2.fillPoly(mask, pts=np.int32([polygon]), color=(255,255,255))
+                    masked_img_to_paf = cv2.bitwise_and(img_ori_to_paf, mask)
+                    masked_img_to_paf = crop_img(masked_img_to_paf, roi_boxes[i])
+                    masked_img_to_paf = cv2.resize(masked_img_to_paf, dsize=(STD_SIZE, STD_SIZE), interpolation=cv2.INTER_LINEAR)
+                    
+                    paf_feature = gen_img_paf(img_crop=masked_img_to_paf, param=prediction, kernel_size=args.paf_size)
                     cv2.imwrite(wfp_paf, paf_feature)
+                    cv2.imwrite(wfp_crop, masked_img_to_paf)
               imgs = []
+              img_oris = []
+              roi_boxes = []
               inputs = []
               input_paths = []
 
@@ -181,28 +206,28 @@ def main(args):
               #    vertices = predict_dense(param, roi_box)
               #    vertices_lst.append(vertices)
               #if args.dump_ply:
-              #    dump_to_ply(vertices, tri, '{}_{}.ply'.format(img_fp.replace(suffix, ''), ind))
+              #    dump_to_ply(vertices, tri, '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}_{}.ply'.format(os.path.basename(img_fp), ind))
               #if args.dump_vertex:
-              #    dump_vertex(vertices, '{}_{}.mat'.format(img_fp.replace(suffix, ''), ind))
+              #    dump_vertex(vertices, '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}_{}.mat'.format(os.path.basename(img_fp), ind))
               #if args.dump_pts:
-              #    wfp = '{}_{}.txt'.format(img_fp.replace(suffix, ''), ind)
+              #    wfp = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}_{}.txt'.format(os.path.basename(img_fp), ind)
               #    np.savetxt(wfp, pts68, fmt='%.3f')
               #    print('Save 68 3d landmarks to {}'.format(wfp))
               #if args.dump_roi_box:
-              #    wfp = '{}_{}.roibox'.format(img_fp.replace(suffix, ''), ind)
+              #    wfp = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}_{}.roibox'.format(os.path.basename(img_fp), ind)
               #    np.savetxt(wfp, roi_box, fmt='%.3f')
               #    print('Save roi box to {}'.format(wfp))
               #if args.dump_paf:
               #    wfp_paf = '/media/rzats/Elements/UV_Data/Incomplete_UVs/{}'.format(os.path.basename(img_fp))
-              #    wfp_crop = '{}_{}_crop.jpg'.format(img_fp.replace(suffix, ''), ind)
+              #    wfp_crop = '{}_{}_crop.jpg'.format(os.path.basename(img_fp), ind)
               #    paf_feature = gen_img_paf(img_crop=img, param=param, kernel_size=args.paf_size)
-
+              #
               #    cv2.imwrite(wfp_paf, paf_feature)
-                  #cv2.imwrite(wfp_crop, img)
-                  #print('Dump to {} and {}'.format(wfp_crop, wfp_paf))
-                  #print('Dump to {}'.format(wfp_paf))
+              #    cv2.imwrite(wfp_crop, img)
+              #    print('Dump to {} and {}'.format(wfp_crop, wfp_paf))
+              #    print('Dump to {}'.format(wfp_paf))
               #if args.dump_obj:
-              #    wfp = '{}_{}.obj'.format(img_fp.replace(suffix, ''), ind)
+              #    wfp = '{}_{}.obj'.format(os.path.basename(img_fp), ind)
               #    colors = get_colors(img_ori, vertices)
               #    write_obj_with_colors(wfp, vertices, tri, colors)
               #    print('Dump obj with sampled texture to {}'.format(wfp))
@@ -229,11 +254,11 @@ def main(args):
           #    draw_landmarks(img_ori, pts_res, wfp=img_fp.replace(suffix, '_3DDFA.jpg'), show_flg=args.show_flg)
         except KeyboardInterrupt:
           raise
-        except:
-          print("Unexpected error:", sys.exc_info()[0])
-          with open("BAD", "a") as file_object:
-            file_object.write(img_fp + "\n")
-          pass     
+        #except:
+        #  print("Unexpected error:", sys.exc_info()[0])
+        #  with open("BAD", "a") as file_object:
+        #    file_object.write(img_fp + "\n")
+        #  pass     
 
 
 if __name__ == '__main__':

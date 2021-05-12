@@ -168,20 +168,31 @@ def draw_landmarks(img, pts, style='fancy', wfp=None, show_flg=False, **kwargs):
             markeredgecolor = kwargs.get('markeredgecolor', 'black')
 
             nums = [0, 17, 22, 27, 31, 36, 42, 48, 60, 68]
+            face_polygon = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17]
 
             # close eyes and mouths
-            plot_close = lambda i1, i2: plt.plot([pts[i][0, i1], pts[i][0, i2]], [pts[i][1, i1], pts[i][1, i2]],
-                                                 color=color, lw=lw, alpha=alpha - 0.1)
-            plot_close(41, 36)
-            plot_close(47, 42)
-            plot_close(59, 48)
-            plot_close(67, 60)
+            #plot_close = lambda i1, i2: plt.plot([pts[i][0, i1], pts[i][0, i2]], [pts[i][1, i1], pts[i][1, i2]],
+            #                                     color=color, lw=lw, alpha=alpha - 0.1)
+            #plot_close(41, 36)
+            #plot_close(47, 42)
+            #plot_close(59, 48)
+            #plot_close(67, 60)
 
-            for ind in range(len(nums) - 1):
-                l, r = nums[ind], nums[ind + 1]
-                plt.plot(pts[i][0, l:r], pts[i][1, l:r], color=color, lw=lw, alpha=alpha - 0.1)
+            #for ind in range(len(nums) - 1):
+            #    l, r = nums[ind], nums[ind + 1]
+            #    plt.plot(pts[i][0, l:r], pts[i][1, l:r], color=color, lw=lw, alpha=alpha - 0.1)
 
-                plt.plot(pts[i][0, l:r], pts[i][1, l:r], marker='o', linestyle='None', markersize=markersize,
+            #    plt.plot(pts[i][0, l:r], pts[i][1, l:r], marker='o', linestyle='None', markersize=markersize,
+            #             color=color,
+            #             markeredgecolor=markeredgecolor, alpha=alpha)
+            #for ind in range(68):
+            #    plt.text(pts[i][0, ind], pts[i][1, ind], ind)
+            plt.plot([pts[i][0, 0], pts[i][0, face_polygon[len(face_polygon)-1]]], [pts[i][1, 0], pts[i][1, face_polygon[len(face_polygon)-1]]], color=color, lw=lw, alpha=alpha - 0.1)
+            for ind in range(len(face_polygon) - 1):
+                l, r = face_polygon[ind], face_polygon[ind + 1]
+                plt.plot([pts[i][0, l], pts[i][0, r]], [pts[i][1, l], pts[i][1, r]], color=color, lw=lw, alpha=alpha - 0.1)
+
+                plt.plot([pts[i][0, l], pts[i][0, r]], [pts[i][1, l], pts[i][1, r]], marker='o', linestyle='None', markersize=markersize,
                          color=color,
                          markeredgecolor=markeredgecolor, alpha=alpha)
 
