@@ -185,8 +185,8 @@ def draw_landmarks(img, pts, style='fancy', wfp=None, show_flg=False, **kwargs):
             #    plt.plot(pts[i][0, l:r], pts[i][1, l:r], marker='o', linestyle='None', markersize=markersize,
             #             color=color,
             #             markeredgecolor=markeredgecolor, alpha=alpha)
-            #for ind in range(68):
-            #    plt.text(pts[i][0, ind], pts[i][1, ind], ind)
+            for ind in range(68):
+                plt.text(pts[i][0, ind], pts[i][1, ind], ind)
             plt.plot([pts[i][0, 0], pts[i][0, face_polygon[len(face_polygon)-1]]], [pts[i][1, 0], pts[i][1, face_polygon[len(face_polygon)-1]]], color=color, lw=lw, alpha=alpha - 0.1)
             for ind in range(len(face_polygon) - 1):
                 l, r = face_polygon[ind], face_polygon[ind + 1]

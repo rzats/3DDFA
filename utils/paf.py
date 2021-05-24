@@ -48,23 +48,17 @@ def gen_img_paf(img_crop, param, kernel_size=3):
         #np.set_printoptions(threshold=sys.maxsize)
         index0 = anchor[0] + ox
         index1 = anchor[1] + oy
-        '''for ii in range(64):
+        for ii in range(64):
           start = 0
-          mid = 32
           end = 63
           
-          midstart = mid
+          midstart = 20
           while midstart > start and index0[ii + 64 * midstart] >= index0[ii + 64 * (midstart-1)]:
             midstart -= 1
-          endstart = mid
+          endstart = 44
           while endstart < end and index0[ii + 64 * endstart] <= index0[ii + 64 * (endstart+1)]:
             endstart += 1
           
-          print("---")
-          print(start)
-          print(midstart)
-          print(endstart)
-          print(end)
           while start <= midstart:
             index0[ii + 64 * start] = 0
             index1[ii + 64 * start] = 0
@@ -72,7 +66,7 @@ def gen_img_paf(img_crop, param, kernel_size=3):
           while end >= endstart:
             index0[ii + 64 * end] = 0
             index1[ii + 64 * end] = 0
-            end -= 1'''
+            end -= 1
           
 
         p = img_crop[index1, index0].reshape(64, 64, 3).transpose(1, 0, 2)
